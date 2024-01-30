@@ -316,22 +316,23 @@ addServerSocket(ServerNetworkLayerTCP *layer, struct addrinfo *ai) {
         return UA_STATUSCODE_BADCOMMUNICATIONERROR;
     }
 
-    /* Some Linux distributions have net.ipv6.bindv6only not activated. So
-     * sockets can double-bind to IPv4 and IPv6. This leads to problems. Use
-     * AF_INET6 sockets only for IPv6. */
+// This is exactly what we want!
+//    /* Some Linux distributions have net.ipv6.bindv6only not activated. So
+//     * sockets can double-bind to IPv4 and IPv6. This leads to problems. Use
+//     * AF_INET6 sockets only for IPv6. */
 
     int optval = 1;
-#if UA_IPV6
-    if(ai->ai_family == AF_INET6 &&
-       UA_setsockopt(newsock, IPPROTO_IPV6, IPV6_V6ONLY,
-                  (const char*)&optval, sizeof(optval)) == -1) {
-        UA_LOG_WARNING(layer->logger, UA_LOGCATEGORY_NETWORK,
-                       "Could not set an IPv6 socket to IPv6 only");
-        UA_close(newsock);
-        return UA_STATUSCODE_BADCOMMUNICATIONERROR;
+//#if UA_IPV6
+//    if(ai->ai_family == AF_INET6 &&
+//       UA_setsockopt(newsock, IPPROTO_IPV6, IPV6_V6ONLY,
+//                  (const char*)&optval, sizeof(optval)) == -1) {
+//        UA_LOG_WARNING(layer->logger, UA_LOGCATEGORY_NETWORK,
+//                       "Could not set an IPv6 socket to IPv6 only");
+//        UA_close(newsock);
+//        return UA_STATUSCODE_BADCOMMUNICATIONERROR;
 
-    }
-#endif
+//    }
+//#endif
     if(UA_setsockopt(newsock, SOL_SOCKET, SO_REUSEADDR,
                   (const char *)&optval, sizeof(optval)) == -1) {
         UA_LOG_WARNING(layer->logger, UA_LOGCATEGORY_NETWORK,
@@ -427,36 +428,53 @@ ServerNetworkLayerTCP_start(UA_ServerNetworkLayer *nl, const UA_Logger *logger,
     }
     char portno[6];
     UA_snprintf(portno, 6, "%d", layer->port);
-    struct addrinfo hints, *res;
-    memset(&hints, 0, sizeof hints);
-#if UA_IPV6
-    hints.ai_family = AF_UNSPEC; /* allow IPv4 and IPv6 */
-#else
-    hints.ai_family = AF_INET;   /* enforce IPv4 only */
-#endif
-    hints.ai_socktype = SOCK_STREAM;
-    hints.ai_flags = AI_PASSIVE;
-#ifdef AI_ADDRCONFIG
-    hints.ai_flags |= AI_ADDRCONFIG;
-#endif
-    hints.ai_protocol = IPPROTO_TCP;
-    int retcode = UA_getaddrinfo(customHostname->length ? hostname : NULL,
-                                 portno, &hints, &res);
-    if(retcode != 0) {
-        UA_LOG_SOCKET_ERRNO_GAI_WRAP(UA_LOG_WARNING(layer->logger, UA_LOGCATEGORY_NETWORK,
-                                                    "getaddrinfo lookup of %s failed with error %d - %s", hostname, retcode, errno_str));
-        return UA_STATUSCODE_BADINTERNALERROR;
-    }
 
-    /* There might be serveral addrinfos (for different network cards,
-     * IPv4/IPv6). Add a server socket for all of them. */
-    struct addrinfo *ai = res;
-    for(layer->serverSocketsSize = 0;
-        layer->serverSocketsSize < FD_SETSIZE && ai != NULL;
-        ai = ai->ai_next) {
-        addServerSocket(layer, ai);
-    }
-    UA_freeaddrinfo(res);
+    // Binding once to ipv6 does accepts for ipv4 too!
+    struct sockaddr_in6 addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin6_family = AF_INET6;
+    addr.sin6_addr = in6addr_any;
+    addr.sin6_port = htons(layer->port);
+
+    struct addrinfo ai;
+    memset(&ai, 0, sizeof(ai));
+    ai.ai_family = AF_INET6;
+    ai.ai_addr = (struct sockaddr*)&addr;
+    ai.ai_addrlen = sizeof(addr);
+    ai.ai_socktype = SOCK_STREAM;
+    ai.ai_protocol = IPPROTO_TCP;
+    addServerSocket(layer, &ai);
+
+//    struct addrinfo hints, *res;
+//    memset(&hints, 0, sizeof hints);
+//#if UA_IPV6
+//    hints.ai_family = AF_UNSPEC; /* allow IPv4 and IPv6 */
+//#else
+//    hints.ai_family = AF_INET;   /* enforce IPv4 only */
+//#endif
+//    hints.ai_socktype = SOCK_STREAM;
+//    hints.ai_flags = AI_PASSIVE;
+//#ifdef AI_ADDRCONFIG
+//    hints.ai_flags |= AI_ADDRCONFIG;
+//#endif
+//    hints.ai_protocol = IPPROTO_TCP;
+//    int retcode = UA_getaddrinfo(customHostname->length ? hostname : NULL,
+//                                 portno, &hints, &res);
+//    if(retcode != 0) {
+//        UA_LOG_SOCKET_ERRNO_GAI_WRAP(UA_LOG_WARNING(layer->logger, UA_LOGCATEGORY_NETWORK,
+//                                                    "getaddrinfo lookup of %s failed with error %d - %s", hostname, retcode, errno_str));
+//        return UA_STATUSCODE_BADINTERNALERROR;
+//    }
+
+//    /* There might be serveral addrinfos (for different network cards,
+//     * IPv4/IPv6). Add a server socket for all of them. */
+//    struct addrinfo *ai = res;
+//    for(layer->serverSocketsSize = 0;
+//        layer->serverSocketsSize < FD_SETSIZE && ai != NULL;
+//        ai = ai->ai_next) {
+//        addServerSocket(layer, ai);
+//    }
+//    UA_freeaddrinfo(res);
 
     if(layer->serverSocketsSize == 0) {
         return UA_STATUSCODE_BADCOMMUNICATIONERROR;
